@@ -1,0 +1,108 @@
+---
+title: "Анализ информации из отзывов о работе аэропортов и авиакомпаний"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(dplyr)
+library(ggplot2)
+library(readr)
+library(lubridate)
+library(stringr)
+library(forcats)
+
+source("~/shared/minor2_2022/1-Intro/hw1/hw1_data.R")
+
+airline = hw1_get_data(df_name = "airline")
+airport = hw1_get_data(df_name = "airport")
+lounge = hw1_get_data(df_name = "lounge")
+seat = hw1_get_data(df_name = "seat")
+
+#график 1
+q1 = filter(airport, !is.na(wifi_connectivity_rating))
+q1 = q1 %>% group_by(author_country) %>% summarise(mean_wifi_rating = mean(wifi_connectivity_rating)) %>% arrange(desc(mean_wifi_rating))
+
+#таблица 2 и график 3
+q2= mutate(seat, passages_qty = str_count(seat$seat_layout, "x|X|-"))
+q2 = filter(q2, passages_qty > 0)
+q2$passages_qty = as.factor(q2$passages_qty)
+q2_table = q2 %>% group_by(passages_qty) %>% summarise(mean_legroom_rating = mean(seat_legroom_rating)) %>% arrange(desc(mean_legroom_rating))
+q2_res = q2 %>% group_by(passages_qty) %>% summarise(mean_legroom_rating = mean(seat_legroom_rating)) %>% arrange(desc(mean_legroom_rating))
+
+two_passages = filter(q2, passages_qty == 2)
+one_passage = filter(q2, passages_qty == 1)
+
+q2$seat_legroom_rating = as.factor(q2$seat_legroom_rating)
+
+two_passages = two_passages %>% group_by(seat_legroom_rating) %>% summarise(n = n()) %>% arrange(desc(n))
+one_passage = one_passage  %>% group_by(seat_legroom_rating) %>% summarise(n = n()) %>% arrange(desc(n))
+
+#число 4 
+lounge1 = filter(lounge, !is.na(cleanliness_rating))
+airport1 = filter(airport, !is.na(terminal_cleanliness_rating))
+
+lounge1$airport = str_to_lower(lounge1$airport)
+airport1$airport_name = str_replace_all(airport1$airport_name, "-", " ")
+airport1 = airport1 %>% rename(airport = airport_name)
+
+lounge1$lounge_name = str_to_lower(lounge1$lounge_name)
+lounge1$lounge_name = str_remove_all(lounge1$lounge_name, "review")
+lounge1$lounge_name = str_remove_all(lounge1$lounge_name, "customer")
+
+lounge1$lounge_name = as.factor(lounge1$lounge_name)
+airport1$airport = as.factor(airport1$airport)
+
+lounge1 = lounge1 %>% group_by(lounge_name, airport) %>% summarise(lounge_mean_clean = mean(cleanliness_rating)) %>% arrange(desc(lounge_mean_clean))
+airport1 = airport1 %>% group_by(airport) %>% summarise(airport_mean_clean = mean(terminal_cleanliness_rating)) %>% arrange(desc(airport_mean_clean))
+
+q3 = inner_join(airport1, lounge1, "airport")
+q3 = mutate(q3, lounge_cleaner_than_airport = if_else(q3$lounge_mean_clean > q3$airport_mean_clean, 1, 0))
+q3 = filter(q3, lounge_cleaner_than_airport == 1)[,-5]
+
+percentage = length(q3$lounge_name)/length(lounge1$lounge_name)*100
+percentage = round(percentage, digits = 1)
+```
+
+##Column {data-width=550}
+
+### Страны, пассажиры из которых поставили наиболее низкие оценки wi-fi
+
+```{r }
+ggplot(data = filter(q1, mean_wifi_rating <= 4)) + geom_col(aes(x = fct_reorder(author_country, mean_wifi_rating), y = mean_wifi_rating), fill = "#7997FF", color = "white", alpha = 1) +
+  coord_flip() +
+  xlab("страна") + 
+  ylab("средняя оценка") +
+  theme_minimal()
+```
+
+### Процент лаунж-зон, которые превосходят по оценке чистоты аэропрт, в котором находятся (от общего числа)
+
+```{r echo=FALSE}
+valueBox(paste(percentage, "%"))
+```
+
+## Column {data-width="450"}
+
+### Средняя оценка удобства пространства для ног в зависимости от количества проходов в самолете
+
+```{r echo=FALSE}
+colnames(q2_res) = c("Количество проходов   |", "|   Средняя оценка удобства пространства для ног")
+knitr::kable(q2_res, format = "html", align = "cc", digits = 2)
+```
+\n  
+\n В среднем, оценка удобства пространства для ног в самолетах почти одинакова, однако выборка для самолетов с двумя проходами больше. Расспределние оценок по категориям говорит о том, что оценки сильно разнятся.
+
+### Распределение оценок, которые пассажиры поставили по критерию "удобство пространства для ног"
+
+```{r echo=FALSE}
+ggplot(data = q2) + geom_bar(aes(x = passages_qty, fill = seat_legroom_rating)) +
+  xlab("количество проходов") + 
+  ylab("количество оценок") +
+  theme_minimal()
+```
+
+
